@@ -13,7 +13,7 @@ It uses a hybrid approach:
 - Structured tools for reliable numbers
 - A dynamic visualization tool that writes pandas + Plotly code only when a chart is requested
 
-The agent is designed to never invent numbers — it always calls a tool.
+The agent is designed to never invent numbers, always calls a tool.
 
 ## Tech Stack
 
