@@ -1,5 +1,5 @@
 """
-Vireo Audio – Refund Analysis Agent (Streamlit UI)
+Vireo Audio – Refund Analysis Agent (Streamlit UI) - 
 """
 
 import streamlit as st
@@ -20,7 +20,7 @@ st.title("Vireo Audio – Refund Analysis Agent")
 st.caption("Ask questions about refunds by reason, by agent, quarters, and get visualizations.")
 
 # ----------------------------------------------------------------------
-# Initialize agent + chat history
+# Initialize
 # ----------------------------------------------------------------------
 if "agent" not in st.session_state:
     try:
@@ -38,7 +38,70 @@ if "agent" not in st.session_state:
         st.stop()
 
 # ----------------------------------------------------------------------
-# Sidebar – example questions
+# Helper: process a user message (used by both chat input and sidebar)
+# ----------------------------------------------------------------------
+def process_user_message(prompt: str):
+    # Add user message to display
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.langgraph_messages.append(HumanMessage(content=prompt))
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Analyzing data..."):
+            try:
+                result = st.session_state.agent.invoke({
+                    "messages": st.session_state.langgraph_messages
+                })
+
+                # Update memory
+                st.session_state.langgraph_messages = result["messages"]
+
+                # Look through ALL messages for a visualization
+                answer = None
+                fig = None
+
+                for msg in reversed(result["messages"]):
+                    content = getattr(msg, "content", None)
+                    if not content:
+                        continue
+
+                    if isinstance(content, str) and content.startswith("VISUALIZATION_SUCCESS::"):
+                        try:
+                            parts = content.split("::", 2)
+                            fig = pio.from_json(parts[2])
+                            answer = f"Here's the visualization you requested:"
+                            break
+                        except Exception as e:
+                            answer = f"Chart generated but could not be rendered: {e}"
+                            break
+
+                # If no visualization found, take the last AI message
+                if answer is None:
+                    last_msg = result["messages"][-1]
+                    answer = last_msg.content
+
+                # Display
+                if fig is not None:
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.markdown(answer)
+                else:
+                    st.markdown(answer)
+
+                # Save to history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": answer if fig is None else "VISUALIZATION_SUCCESS::chart::" + parts[2]
+                })
+
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                st.exception(e)
+
+
+# ----------------------------------------------------------------------
+# Sidebar – example questions (now auto-sends)
 # ----------------------------------------------------------------------
 with st.sidebar:
     st.header("Example Questions")
@@ -54,11 +117,8 @@ with st.sidebar:
     ]
 
     for example in examples:
-        if st.button(example, use_container_width=True):
-            # Directly process the example instead of only storing it
-            st.session_state.messages.append({"role": "user", "content": example})
-            st.session_state.langgraph_messages.append(HumanMessage(content=example))
-            st.session_state.process_example = True   # flag
+        if st.button(example, use_container_width=True, key=f"ex_{example}"):
+            process_user_message(example)
             st.rerun()
 
     st.divider()
@@ -67,6 +127,7 @@ with st.sidebar:
         st.session_state.langgraph_messages = []
         st.rerun()
 
+
 # ----------------------------------------------------------------------
 # Display chat history
 # ----------------------------------------------------------------------
@@ -74,56 +135,19 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         content = msg["content"]
 
-        # Handle dynamic visualization
         if isinstance(content, str) and content.startswith("VISUALIZATION_SUCCESS::"):
             try:
                 parts = content.split("::", 2)
-                fig_json = parts[2]
-                fig = pio.from_json(fig_json)
+                fig = pio.from_json(parts[2])
                 st.plotly_chart(fig, use_container_width=True)
             except Exception as e:
                 st.error(f"Could not render chart: {e}")
-                st.code(content)
         else:
             st.markdown(content)
+
 
 # ----------------------------------------------------------------------
 # Chat input
 # ----------------------------------------------------------------------
 if prompt := st.chat_input("Ask about refunds..."):
-    # Add user message
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.session_state.langgraph_messages.append(HumanMessage(content=prompt))
-
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # Get agent response
-    with st.chat_message("assistant"):
-        with st.spinner("Analyzing data..."):
-            try:
-                result = st.session_state.agent.invoke({
-                    "messages": st.session_state.langgraph_messages
-                })
-
-                # Get the final AI message
-                last_message = result["messages"][-1]
-                answer = last_message.content
-
-                # Update conversation memory
-                st.session_state.langgraph_messages = result["messages"]
-
-                # Display answer
-                if isinstance(answer, str) and answer.startswith("VISUALIZATION_SUCCESS::"):
-                    parts = answer.split("::", 2)
-                    fig = pio.from_json(parts[2])
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.markdown(answer)
-
-                # Save to display history
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
-                st.exception(e)
+    process_user_message(prompt)

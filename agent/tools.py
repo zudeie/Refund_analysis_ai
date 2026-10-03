@@ -2,6 +2,9 @@
 Vireo Audio – Agent Tools (Fixed)
 """
 
+import uuid
+from datetime import datetime
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -304,7 +307,9 @@ def generate_visualization(name: str, pandas_code: str, plotly_code: str) -> str
     """
     if refunds.empty:
         return "Error: No refund data loaded."
-
+    
+    # Make the name unique every time
+    unique_name = f"{name}_{datetime.now().strftime('%H%M%S')}_{uuid.uuid4().hex[:6]}"
     file_path = VIS_DIR / f"{name}.json"
 
     full_code = f"""

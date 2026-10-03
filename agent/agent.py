@@ -27,7 +27,7 @@ def create_refund_agent():
         temperature=0,
         # Optional performance settings:
         num_ctx=8192,          # context window
-        num_predict=2024,      # max tokens to generate
+        num_predict=5024,      # max tokens to generate
         # api_key=api_key
     )
 
