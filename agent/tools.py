@@ -1,35 +1,48 @@
 """
-Vireo Audio – Agent Tools
-All tools have detailed docstrings so the LLM understands how to use them.
+Vireo Audio – Agent Tools (Fixed)
 """
 
 import pandas as pd
-import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from pathlib import Path
-from io import BytesIO, StringIO
+from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
-from typing import Optional, Annotated
+from typing import Optional
 from langchain_core.tools import tool
-from langchain_core.tools.base import InjectedToolCallId
-from langchain_core.messages import ToolMessage
-from langgraph.types import Command
-import base64
 import os
 
 CLEAN_DIR = Path("cleaned_data")
 VIS_DIR = Path("visualizations")
 VIS_DIR.mkdir(exist_ok=True)
 
-# Load data once at module level
-refunds = pd.read_csv(CLEAN_DIR / "clean_refunds.csv", parse_dates=["created_at"])
-agents_df = pd.read_csv(CLEAN_DIR / "agents.csv")
+# ----------------------------------------------------------------------
+# Robust data loading
+# ----------------------------------------------------------------------
+def load_data():
+    refunds_path = CLEAN_DIR / "clean_refunds.csv"
+    agents_path = CLEAN_DIR / "agents.csv"
+
+    if not refunds_path.exists():
+        raise FileNotFoundError(f"Cannot find {refunds_path}. Run the cleaning pipeline first.")
+
+    refunds = pd.read_csv(refunds_path, parse_dates=["created_at"])
+    agents_df = pd.read_csv(agents_path) if agents_path.exists() else pd.DataFrame()
+    return refunds, agents_df
+
+# Load once
+try:
+    refunds, agents_df = load_data()
+    print(f"✓ Loaded {len(refunds)} clean refund tickets")
+except Exception as e:
+    print(f"⚠️  Data loading error: {e}")
+    refunds = pd.DataFrame()
+    agents_df = pd.DataFrame()
 
 
 # ============================================================
-# 1. STRUCTURED QUERY TOOLS
+# STRUCTURED TOOLS
 # ============================================================
 
 @tool
@@ -42,6 +55,8 @@ def get_monthly_refund_by_reason(month: Optional[str] = None) -> str:
     Returns:
         str: Table of year_month, refund_reason_code, count, total_inr
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
     df = refunds.copy()
     if month:
         df = df[df["year_month"] == month]
@@ -65,6 +80,8 @@ def get_monthly_refund_by_agent(month: Optional[str] = None) -> str:
     Returns:
         str: Table of year_month, agent_id, name, count, total_inr
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
     df = refunds.copy()
     if month:
         df = df[df["year_month"] == month]
@@ -88,6 +105,8 @@ def get_quarter_total(quarter: str) -> str:
     Returns:
         str: Total amount, ticket count, breakdown by reason and top agents.
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
     df = refunds[refunds["quarter"] == quarter]
     if df.empty:
         return f"No data found for quarter: {quarter}"
@@ -129,6 +148,8 @@ def get_agent_detail(agent_id: str) -> str:
     Returns:
         str: Agent name, total refunded, monthly breakdown and reason breakdown.
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
     df = refunds[refunds["agent_id"] == agent_id]
     if df.empty:
         return f"No refunds found for agent_id: {agent_id}"
@@ -168,6 +189,8 @@ def get_reason_breakdown(quarter: Optional[str] = None) -> str:
     Returns:
         str: Table with reason, count, total_inr and percentage.
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
     df = refunds.copy()
     if quarter:
         df = df[df["quarter"] == quarter]
@@ -193,6 +216,8 @@ def get_top_agents(n: int = 5, quarter: Optional[str] = None) -> str:
     Returns:
         str: Table of top agents with count and total_inr.
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
     df = refunds.copy()
     if quarter:
         df = df[df["quarter"] == quarter]
@@ -218,6 +243,9 @@ def compare_quarters(quarter1: str, quarter2: str) -> str:
     Returns:
         str: Side-by-side comparison of total, count and average refund.
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
+
     def summary(q):
         df = refunds[refunds["quarter"] == q]
         return {
@@ -240,39 +268,26 @@ def compare_quarters(quarter1: str, quarter2: str) -> str:
 
 
 # ============================================================
-# 2. DYNAMIC VISUALIZATION TOOL (like your example)
+# DYNAMIC VISUALIZATION (simplified – no InjectedToolCallId)
 # ============================================================
 
 @tool
-def generate_visualization(
-    name: str,
-    pandas_code: str,
-    plotly_code: str,
-    tool_call_id: Annotated[str, InjectedToolCallId]
-) -> str:
+def generate_visualization(name: str, pandas_code: str, plotly_code: str) -> str:
     """Generate a dynamic visualization using pandas + Plotly.
-    The visualization is automatically rendered on the frontend if successful.
 
     Args:
         name: Short name for the visualization (use underscores, no spaces). Example: top_agents_2025q1
         pandas_code: Python code that creates a DataFrame named 'df' from the global 'refunds' DataFrame.
-                     You can filter, group, aggregate etc.
         plotly_code: Python code that creates a Plotly figure named 'fig' from the 'df' DataFrame.
 
     Returns:
-        str: Success message or error message.
+        str: Success message with base64-like marker or error message.
 
     ## Assumptions
-    The following are already available:
-    - A global DataFrame named `refunds` (the cleaned refund data)
-    - import pandas as pd
-    - import plotly.express as px
-    - import plotly.graph_objects as go
-    - import plotly.io as pio
+    - Global DataFrame `refunds` is available
+    - pandas, plotly.express, plotly.graph_objects, plotly.io are available
 
     ## Example
-    User asks: "Show me top 5 agents by refund amount in 2025Q1"
-
     pandas_code = '''
     df = (refunds[refunds["quarter"] == "2025Q1"]
           .groupby("name")["refund_amount_inr"]
@@ -281,30 +296,27 @@ def generate_visualization(
           .head(5)
           .reset_index())
     '''
-
     plotly_code = '''
     fig = px.bar(df, x="name", y="refund_amount_inr",
-                 title="Top 5 Agents by Refund Amount – 2025Q1",
-                 labels={"name": "Agent", "refund_amount_inr": "Refund Amount (₹)"})
+                 title="Top 5 Agents by Refund Amount – 2025Q1")
     fig.update_layout(xaxis_tickangle=-45)
     '''
     """
+    if refunds.empty:
+        return "Error: No refund data loaded."
+
     file_path = VIS_DIR / f"{name}.json"
 
-    # Build the full executable code
     full_code = f"""
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 
-# === User pandas code ===
 {pandas_code}
 
-# === User plotly code ===
 {plotly_code}
 
-# Save figure
 if 'fig' in locals() or 'fig' in globals():
     fig_json = pio.to_json(fig)
     with open(r'{file_path}', 'w') as f:
@@ -329,8 +341,6 @@ if 'fig' in locals() or 'fig' in globals():
         if file_path.exists():
             with open(file_path, "r") as f:
                 fig_json = f.read()
-
-            # Return a special message that the frontend can detect
             return f"VISUALIZATION_SUCCESS::{name}::{fig_json}"
         else:
             return f"Error: Figure was not created.\nSTDERR:\n{stderr_capture.getvalue()}"
@@ -339,8 +349,6 @@ if 'fig' in locals() or 'fig' in globals():
         return f"Error executing visualization code: {str(e)}\n\nSTDERR:\n{stderr_capture.getvalue()}"
 
 
-# ============================================================
-# Export all tools
 # ============================================================
 ALL_TOOLS = [
     get_monthly_refund_by_reason,

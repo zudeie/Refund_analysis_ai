@@ -1,5 +1,6 @@
 from typing import Annotated, TypedDict
-from langchain_groq import ChatGroq
+
+from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, BaseMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -21,10 +22,13 @@ def create_refund_agent():
     if not api_key:
         raise ValueError("GROQ_API_KEY not found in environment variables")
 
-    llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+    llm = ChatOllama(
+        model="hf.co/unsloth/Qwen3.5-9B-GGUF:UD-Q4_K_XL",
         temperature=0,
-        api_key=api_key
+        # Optional performance settings:
+        num_ctx=8192,          # context window
+        num_predict=2024,      # max tokens to generate
+        # api_key=api_key
     )
 
     llm_with_tools = llm.bind_tools(ALL_TOOLS)

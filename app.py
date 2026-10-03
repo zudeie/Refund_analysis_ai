@@ -55,8 +55,10 @@ with st.sidebar:
 
     for example in examples:
         if st.button(example, use_container_width=True):
+            # Directly process the example instead of only storing it
             st.session_state.messages.append({"role": "user", "content": example})
             st.session_state.langgraph_messages.append(HumanMessage(content=example))
+            st.session_state.process_example = True   # flag
             st.rerun()
 
     st.divider()
