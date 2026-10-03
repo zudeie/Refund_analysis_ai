@@ -1,5 +1,5 @@
 """
-Vireo Audio – Refund Analysis Agent (Streamlit UI) - 
+Vireo Audio – Refund Analysis Agent (Streamlit UI)
 """
 
 import streamlit as st
@@ -36,12 +36,17 @@ if "agent" not in st.session_state:
         st.error("Failed to create agent")
         st.exception(e)
         st.stop()
+else:
+    # Safety: reset corrupted history from previous runs
+    if st.session_state.get("messages") and not isinstance(st.session_state.messages[0], dict):
+        st.session_state.messages = []
+        st.session_state.langgraph_messages = []
 
 # ----------------------------------------------------------------------
 # Helper: process a user message (used by both chat input and sidebar)
 # ----------------------------------------------------------------------
 def process_user_message(prompt: str):
-    # Add user message to display
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.session_state.langgraph_messages.append(HumanMessage(content=prompt))
 
@@ -55,49 +60,61 @@ def process_user_message(prompt: str):
                     "messages": st.session_state.langgraph_messages
                 })
 
-                # Update memory
+                # Update LangGraph memory
                 st.session_state.langgraph_messages = result["messages"]
 
-                # Look through ALL messages for a visualization
                 answer = None
                 fig = None
+                fig_json = None
 
+                # Look through ALL messages for a visualization
                 for msg in reversed(result["messages"]):
                     content = getattr(msg, "content", None)
-                    if not content:
+                    if not content or not isinstance(content, str):
                         continue
 
-                    if isinstance(content, str) and content.startswith("VISUALIZATION_SUCCESS::"):
+                    if content.startswith("VISUALIZATION_SUCCESS::"):
                         try:
                             parts = content.split("::", 2)
-                            fig = pio.from_json(parts[2])
-                            answer = f"Here's the visualization you requested:"
-                            break
+                            if len(parts) >= 3:
+                                fig = pio.from_json(parts[2])
+                                fig_json = parts[2]
+                                answer = "Here's the visualization you requested:"
+                                break
                         except Exception as e:
                             answer = f"Chart generated but could not be rendered: {e}"
                             break
 
-                # If no visualization found, take the last AI message
+                # Fallback to the last AI message
                 if answer is None:
                     last_msg = result["messages"][-1]
-                    answer = last_msg.content
+                    answer = getattr(last_msg, "content", str(last_msg))
 
                 # Display
                 if fig is not None:
-                    st.plotly_chart(fig, use_container_width=True)
+                    chart_key = f"chart_live_{len(st.session_state.messages)}"
+                    st.plotly_chart(fig, use_container_width=True, key=chart_key)
                     st.markdown(answer)
                 else:
                     st.markdown(answer)
 
-                # Save to history
+                # Always store a proper dict
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": answer if fig is None else "VISUALIZATION_SUCCESS::chart::" + parts[2]
+                    "content": (
+                        f"VISUALIZATION_SUCCESS::chart::{fig_json}"
+                        if fig is not None and fig_json is not None
+                        else answer
+                    )
                 })
 
             except Exception as e:
                 st.error(f"Error: {str(e)}")
                 st.exception(e)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"Error: {str(e)}"
+                })
 
 
 # ----------------------------------------------------------------------
@@ -129,17 +146,28 @@ with st.sidebar:
 
 
 # ----------------------------------------------------------------------
-# Display chat history
+# Display chat history (defensive + unique keys)
 # ----------------------------------------------------------------------
-for msg in st.session_state.messages:
+for i, msg in enumerate(st.session_state.messages):
+    # Skip anything that is not a proper dict
+    if not isinstance(msg, dict) or "role" not in msg:
+        continue
+
     with st.chat_message(msg["role"]):
-        content = msg["content"]
+        content = msg.get("content", "")
 
         if isinstance(content, str) and content.startswith("VISUALIZATION_SUCCESS::"):
             try:
                 parts = content.split("::", 2)
-                fig = pio.from_json(parts[2])
-                st.plotly_chart(fig, use_container_width=True)
+                if len(parts) >= 3:
+                    fig = pio.from_json(parts[2])
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True,
+                        key=f"chart_hist_{i}"
+                    )
+                else:
+                    st.markdown(content)
             except Exception as e:
                 st.error(f"Could not render chart: {e}")
         else:

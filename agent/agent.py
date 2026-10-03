@@ -26,7 +26,7 @@ def create_refund_agent():
         model="hf.co/unsloth/Qwen3.5-9B-GGUF:UD-Q4_K_XL",
         temperature=0,
         # Optional performance settings:
-        num_ctx=8192,          # context window
+        num_ctx=16192,          # context window
         num_predict=5024,      # max tokens to generate
         # api_key=api_key
     )
